@@ -1,0 +1,105 @@
+name: Dockerfile Integrity Check
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repository manually
+        run: |
+          git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} .
+
+      - name: Ensure backend Dockerfile exists
+        run: |
+          if [ ! -f "backend/Dockerfile" ]; then
+            echo "Missing backend/Dockerfile"
+            exit 1
+          fi
+
+      - name: Ensure backend Dockerfile is not empty
+        run: |
+          if [ ! -s "backend/Dockerfile" ]; then
+            echo "backend/Dockerfile is empty"
+            exit 1
+          fi
+
+      - name: Build backend image
+        run: |
+          docker build -f backend/Dockerfile -t backend-test backend
+
+      - name: Run backend container
+        run: |
+          docker run -d --name backend-test-run -p 8081:8080 backend-test
+          sleep 3
+
+      - name: Verify backend response
+        run: |
+          RESPONSE=$(curl --fail --retry 5 --retry-delay 1 -s http://localhost:8081)
+          echo "$RESPONSE"
+          if [[ "$RESPONSE" != *"Hello, World from Go backend!"* ]]; then
+            echo "Unexpected backend response"
+            exit 1
+          fi
+
+      - name: Stop backend container
+        run: |
+          docker stop backend-test-run
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repository manually
+        run: |
+          git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} .
+
+      - name: Ensure frontend Dockerfile exists
+        run: |
+          if [ ! -f "frontend/Dockerfile" ]; then
+            echo "Missing frontend/Dockerfile"
+            exit 1
+          fi
+
+      - name: Ensure frontend Dockerfile is not empty
+        run: |
+          if [ ! -s "frontend/Dockerfile" ]; then
+            echo "frontend/Dockerfile is empty"
+            exit 1
+          fi
+
+      - name: Build frontend image
+        run: |
+          docker build -f frontend/Dockerfile -t frontend-test frontend
+
+      - name: Run frontend container
+        run: |
+          docker run -d --name frontend-test-run -p 8082:80 frontend-test
+          sleep 3
+
+      - name: Verify frontend response
+        run: |
+          STATUS=$(curl --write-out "%{http_code}" --silent --output /tmp/frontend-response.txt http://localhost:8082)
+          if [ "$STATUS" != "200" ]; then
+            echo "Expected 200 but got $STATUS"
+            cat /tmp/frontend-response.txt
+            exit 1
+          fi
+          if [ ! -s /tmp/frontend-response.txt ]; then
+            echo "Frontend returned an empty body"
+            exit 1
+          fi
+          echo "Frontend response is valid"
+
+      - name: Stop frontend container
+        run: |
+          docker stop frontend-test-run
